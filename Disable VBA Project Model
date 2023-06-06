@@ -1,0 +1,8 @@
+# Disable Trust Access to VBA project model object
+# If VBA is enabled in another application, change the registry path
+$TrustAccessRegPath = "HKCU:\Software\Microsoft\Office\16.0\Word\Security\AccessVBOM"
+$TrustAccessValue = 0
+New-Item -Path $TrustAccessRegPath -Force | Out-Null
+New-ItemProperty -Path $TrustAccessRegPath -Name "VBOMDisabled" -Value $TrustAccessValue -PropertyType DWORD -Force | Out-Null
+
+
