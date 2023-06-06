@@ -1,0 +1,81 @@
+# Import the ActiveDirectory module
+Import-Module ActiveDirectory
+
+# Set the path to the Excel file that you want to create
+$filePath = "C:\temp\AdminUsers.xlsx"
+
+# Set the name of the worksheet in the Excel file
+$worksheetName = "Admin Users"
+
+# Set the title of the Excel file
+$title = "List of Domain and Local Administrators"
+
+# Set the list of domain names that you want to search for administrators in
+$domains = "domain1.com", "domain2.com"
+
+# Initialize an empty array to store the list of administrators
+$admins = @()
+
+# Loop through each domain
+foreach ($domain in $domains) {
+    # Search for Domain Admins group in the domain
+    $daGroup = Get-ADGroup -Filter {Name -eq "Domain Admins"} -Server $domain
+    # Search for Local Administrators group in the domain
+    $laGroup = Get-ADGroup -Filter {Name -eq "Local Administrators"} -Server $domain
+
+    # If the Domain Admins group was found, get the members of the group
+    if ($daGroup) {
+        $daMembers = Get-ADGroupMember -Identity $daGroup -Server $domain
+        # Add the members to the array of administrators
+        $admins += $daMembers
+    }
+
+    # If the Local Administrators group was found, get the members of the group
+    if ($laGroup) {
+        $laMembers = Get-ADGroupMember -Identity $laGroup -Server $domain
+        # Add the members to the array of administrators
+        $admins += $laMembers
+    }
+}
+
+# Remove any duplicate entries from the array
+$admins = $admins | Select-Object -Unique
+
+# Create the Excel file if it doesn't already exist
+if (!(Test-Path $filePath)) {
+    # Create a new Excel workbook
+    $excel = New-Object -ComObject Excel.Application
+    $workbook = $excel.Workbooks.Add()
+    # Save the workbook as an Excel file
+    $workbook.SaveAs($filePath)
+    # Close the Excel application
+    $excel.Quit()
+}
+
+# Open the Excel file
+$excel = New-Object -ComObject Excel.Application
+$workbook = $excel.Workbooks.Open($filePath)
+
+# Check if the worksheet already exists
+$worksheetExists = $false
+foreach ($worksheet in $workbook.Worksheets) {
+    if ($worksheet.Name -eq $worksheetName) {
+        $worksheetExists = $true
+        break
+    }
+}
+
+# If the worksheet doesn't exist, create it
+if (!$worksheetExists) {
+    $worksheet = $workbook.Worksheets.Add()
+    $worksheet.Name = $worksheetName
+}
+
+# Set the title of the worksheet
+$worksheet.Cells.Item(1, 1) = $title
+
+# Set the column headers
+$worksheet.Cells.Item(2, 1) = "Name"
+$worksheet.Cells.Item(2, 2) = "Distinguished Name"
+
+# Set the column
