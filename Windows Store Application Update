@@ -1,0 +1,21 @@
+# Get a list of all installed apps
+$apps = Get-AppxPackage -AllUsers
+
+# Loop through each app and check for updates
+foreach ($app in $apps) {
+
+    # Get the current version and package ID of the app
+    $currentVersion = $app.Version
+    $packageId = $app.PackageFamilyName
+
+    # Get the latest version available in the Microsoft Store
+    $latestVersion = (Get-AppxPackageManifest $packageId).Package.Identity.Version
+
+    # If there is an update available, use winget to update the app
+    if ($latestVersion -gt $currentVersion) {
+        winget upgrade $app.Name -q
+    }
+}
+
+# Print a message indicating that the script has finished
+Write-Output "App update check complete."
