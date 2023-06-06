@@ -1,0 +1,139 @@
+# Connect to MsolService
+Connect-MsolService
+
+# Connect to Exchange Online PowerShell with MFA
+Connect-ExchangeOnline
+
+while ($true) {
+    $UserAccount = Read-Host "Enter an email address to audit (or type 'exit' to quit)"
+
+    if ($UserAccount -eq "exit") {
+        break
+    }
+
+    $User = Get-MsolUser -UserPrincipalName $UserAccount
+
+    if ($User -eq $null) {
+        Write-Host "User account '$UserAccount' not found."
+        continue
+    }
+
+    $Report = [System.Collections.Generic.List[Object]]::new() # Create output file
+
+    $MFADefaultMethod = ($User.StrongAuthenticationMethods | Where-Object { $_.IsDefault -eq $true }).MethodType
+    $MFAPhoneNumber = $User.StrongAuthenticationUserDetails.PhoneNumber
+    $AlternateMFAPhoneNumbers = $User.StrongAuthenticationUserDetails.AlternativePhoneNumber
+    $PrimarySMTP = $User.ProxyAddresses | Where-Object { $_ -clike "SMTP:*" } | ForEach-Object { $_ -replace "SMTP:", "" }
+    $Aliases = $User.ProxyAddresses | Where-Object { $_ -clike "smtp:*" } | ForEach-Object { $_ -replace "smtp:", "" }
+
+    if ($User.StrongAuthenticationRequirements) {
+        $LegacyMFA = $User.StrongAuthenticationRequirements.State
+    } else {
+        $LegacyMFA = 'Disabled'
+    }
+
+    if ($MFADefaultMethod) {
+        switch ($MFADefaultMethod) {
+            "OneWaySMS" { $MFADefaultMethod = "Text code authentication phone" }
+            "TwoWayVoiceMobile" { $MFADefaultMethod = "Call authentication phone" }
+            "TwoWayVoiceOffice" { $MFADefaultMethod = "Call office phone" }
+            "PhoneAppOTP" { $MFADefaultMethod = "Authenticator app or hardware token" }
+            "PhoneAppNotification" { $MFADefaultMethod = "Microsoft authenticator app" }
+        }
+    } else {
+        $MFADefaultMethod = "Not enabled"
+    }
+
+    $RegisteredDevices = Get-MsolDevice -RegisteredOwnerUpn $User.UserPrincipalName | Select-Object -ExpandProperty DisplayName
+
+    # Get the specific user mailbox
+    $mailbox = Get-Mailbox -Identity $UserAccount
+
+    if ($mailbox) {
+        $forwardingSMTPAddress = $mailbox.ForwardingSMTPAddress
+        $externalRecipient = $null
+
+        if ($forwardingSMTPAddress) {
+            $email = ($forwardingSMTPAddress -split "SMTP:")[1]
+            $domain = ($email -split "@")[1]
+
+            $acceptedDomains = Get-AcceptedDomain
+            if ($acceptedDomains.DomainName -notcontains $domain) {
+                $externalRecipient = $email
+            }
+        }
+
+        $externalForwarding = if ($forwardingSMTPAddress) { "Enabled" } else { "Disabled" }
+        $externalRecipient = if ($externalRecipient) { $externalRecipient } else { "N/A" }
+
+        $results = [PSCustomObject]@{
+            ExternalForwarding = $externalForwarding
+            ExternalRecipients = $externalRecipient
+        }
+    }
+
+    # Get inbox rules for the specified email address
+    $mailbox = Get-Mailbox -Identity $UserAccount
+
+    if ($mailbox) {
+        $forwardingRules = $null
+        $rules = Get-InboxRule -Mailbox $mailbox.primarysmtpaddress
+        $forwardingRules = $rules | Where-Object { $_.ForwardTo -or $_.ForwardAsAttachmentTo }
+        $result = @()
+
+        foreach ($rule in $forwardingRules) {
+            $recipients = @()
+            $recipients = $rule.ForwardTo | Where-Object { $_ -match "SMTP" }
+            $recipients += $rule.ForwardAsAttachmentTo | Where-Object { $_ -match "SMTP" }
+
+            $externalRecipients = @()
+
+            foreach ($recipient in $recipients) {
+                $email = ($recipient -split "SMTP:")[1].Trim("]")
+                $domain = ($email -split "@")[1]
+
+                if ($acceptedDomains.DomainName -notcontains $domain) {
+                    $externalRecipients += $email
+                }
+            }
+
+            if ($externalRecipients) {
+                foreach ($extRecipient in $externalRecipients) {
+                    $ruleResult = [PSCustomObject]@{
+                        RuleName           = $rule.Name
+                        RuleDescription    = $rule.Description
+                        ExternalRecipient  = $extRecipient
+                        RuleID             = $rule.Identity
+                    }
+
+                    $result += $ruleResult
+                }
+            }
+        }
+
+        $ReportLine = [PSCustomObject] @{
+            UserPrincipalName        = $User.UserPrincipalName
+            DisplayName              = $User.DisplayName
+            LegacyMFA                = $LegacyMFA
+            MFADefaultMethod         = $MFADefaultMethod
+            MFAPhoneNumber           = $MFAPhoneNumber
+            AlternateMFAPhoneNumbers = ($AlternateMFAPhoneNumbers -join ',')
+            PrimarySMTP              = ($PrimarySMTP -join ',')
+            Aliases                  = ($Aliases -join ',')
+            RegisteredDevices        = ($RegisteredDevices -join ',')
+            ExternalForwarding       = if ($forwardingSMTPAddress) { "Enabled" } else { "Disabled" }
+            ExternalRecipients       = if ($results) { $results.ExternalRecipients } else { "N/A" }
+            ExternalInboxRules       = if ($result) { "Yes" } else { "None" }
+            RuleName                 = $null
+            RuleDescription          = $null
+            ExternalRecipient        = $null
+            RuleID                   = $null
+        }
+
+        $Report += $result
+        $Report += $ReportLine
+
+        
+        $Report | Sort-Object UserPrincipalName | Select-Object UserPrincipalName, DisplayName, LegacyMFA, MFADefaultMethod, MFAPhoneNumber, AlternateMFAPhoneNumbers, PrimarySMTP, Aliases, RegisteredDevices, ExternalForwarding, ExternalRecipients, ExternalInboxRules, RuleName, RuleDescription, ExternalRecipient, RuleID | Out-GridView
+    }
+}
