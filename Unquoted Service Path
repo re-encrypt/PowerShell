@@ -1,0 +1,16 @@
+$services = Get-Service
+$totalCount = $services.Count
+$processedCount = 0
+
+foreach ($service in $services) {
+    $path = (Get-WmiObject Win32_Service -Filter "Name='$($service.Name)'" | Select-Object PathName).PathName
+
+    if ($path -notlike '"*') {
+        Write-Progress -Activity "Checking service paths" -Status "Processing $($service.Name)" -PercentComplete (($processedCount / $totalCount) * 100)
+        "$($service.Name): $path" | Out-File -FilePath "$([Environment]::GetFolderPath('Desktop'))\ServicePaths.txt" -Append
+    }
+
+    $processedCount++
+}
+
+Write-Progress -Activity "Checking service paths" -Status "Complete" -PercentComplete 100
